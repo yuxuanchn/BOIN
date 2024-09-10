@@ -254,14 +254,14 @@ get.oc <- function (target, p.true, ncohort, cohortsize, n.earlystop = 100,
       }
     }
     for (i in 1:ncohort) {
-      if (titration && n[d] < cohortsize && ft){
+      if (titration && n[d] < cohortsize && ft){ # first time transition from titration (single patient) to treating the full cohort size
         ft=FALSE
         y[d] = y[d] + sum(runif(cohortsize - 1) < p.true[d])
         n[d] = n[d] + cohortsize - 1
       }
       else {
-        newcohort = runif(cohortsize)<p.true[d];
-        if((sum(n)+cohortsize) >= npts){
+        newcohort = runif(cohortsize)<p.true[d]; # generate toxicity result from new cohort in current dose d
+        if((sum(n)+cohortsize) >= npts){ # if total patient sample size exceeds limit, reduce number in the cohort
           nremain = npts - sum(n);
           y[d] = y[d] + sum(newcohort[1:nremain]);
           n[d] = n[d] + nremain;
@@ -273,7 +273,8 @@ get.oc <- function (target, p.true, ncohort, cohortsize, n.earlystop = 100,
         }
       }
       
-      
+      # determining whether a dose level should be eliminated due to excessive 
+      # toxicity and whether the trial should be stopped early based on safety rules.
       if (!is.na(b.elim[n[d]])) {
         if (y[d] >= b.elim[n[d]]) {
           elimi[d:ndose] = 1
@@ -282,7 +283,7 @@ get.oc <- function (target, p.true, ncohort, cohortsize, n.earlystop = 100,
             break
           }
         }
-        if (extrasafe) {
+        if (extrasafe) { # prob(p1>target DLT | n[1], y[1]) > elimination cutoff
           if (d == 1 && n[1] >= 3) {
             if (1 - pbeta(target, y[1] + 1, n[1] - y[1] +
                           1) > cutoff.eli - offset) {
@@ -293,23 +294,25 @@ get.oc <- function (target, p.true, ncohort, cohortsize, n.earlystop = 100,
         }
       }
       
-      
+      ###??? why additional conditions? can n[d] exceed n.earlystop and not stop? ----------------------------------
       if(n[d]>=n.earlystop &&
          (
-           (y[d]>b.e[n[d]] && y[d]<b.d[n[d]])||
-           (d==1 && y[d]>=b.d[n[d]]) ||
-           ((d==ndose||elimi[d+1]==1) && y[d]<=b.e[n[d]])
+           (y[d]>b.e[n[d]] && y[d]<b.d[n[d]])|| # current dose between boundaries, acceptable
+           (d==1 && y[d]>=b.d[n[d]]) || #  lowest dose is too toxic
+           ((d==ndose||elimi[d+1]==1) && y[d]<=b.e[n[d]]) #  current dose is the highest dose and lower than escalation boundary
+           # or next dose already eliminated and current dose is lower than escalation boundary
          )
       ) break;
       
-      if (y[d] <= b.e[n[d]] && d != ndose) {
+      
+      if (y[d] <= b.e[n[d]] && d != ndose) { # decide to escalate
         if (elimi[d + 1] == 0)
           d = d + 1
       }
-      else if (y[d] >= b.d[n[d]] && d != 1) {
+      else if (y[d] >= b.d[n[d]] && d != 1) { # decide to de-escalate
         d = d - 1
       }
-      else {
+      else { # stay
         d = d
       }
     }

@@ -197,7 +197,9 @@ get.oc.comb <- function (target, p.true, ncohort, cohortsize, n.earlystop = NULL
                dim = c(dim(p.true), ntrial))
     N <- array(matrix(rep(0, length(p.true) * ntrial), dim(p.true)[1]),
                dim = c(dim(p.true), ntrial))
-    dselect = matrix(rep(0, 2 * ntrial), ncol = 2)
+    dselect = matrix(rep(0, 2 * ntrial), ncol = 2) # selected dose default set to 0
+    
+    ## get boundary parameters -------------------------------------------------
     if (cohortsize > 1) {
       temp = get.boundary(target, ncohort, cohortsize,
                           n.earlystop=100, p.saf, p.tox, cutoff.eli, extrasafe)$full_boundary_tab
@@ -212,12 +214,16 @@ get.oc.comb <- function (target, p.true, ncohort, cohortsize, n.earlystop = NULL
                                                   (1 - p.saf)/(p.saf * (1 - target)))
     lambda2 = log((1 - target)/(1 - p.tox))/log(p.tox * (1 -
                                                            target)/(target * (1 - p.tox)))
+    
+    
     if (cohortsize == 1)
       titration = FALSE
+    
+    # simulation trials -------------------------------------------------------
     for (trial in 1:ntrial) {
-      y <- matrix(rep(0, ndose), dim(p.true)[1], dim(p.true)[2])
-      n <- matrix(rep(0, ndose), dim(p.true)[1], dim(p.true)[2])
-      earlystop = 0
+      y <- matrix(rep(0, ndose), dim(p.true)[1], dim(p.true)[2]) # DLT patients
+      n <- matrix(rep(0, ndose), dim(p.true)[1], dim(p.true)[2]) # patients treated
+      earlystop = 0 # flag for elimination stop
       d = startdose
       elimi = matrix(rep(0, ndose), dim(p.true)[1], dim(p.true)[2])
       ft=TRUE #flag used to determine whether or not to add cohortsize-1 patients to a dose for the first time when titration is triggered.
@@ -259,7 +265,8 @@ get.oc.comb <- function (target, p.true, ncohort, cohortsize, n.earlystop = NULL
         }
       }
       for (pp in 1:ncohort) {
-
+        
+        ## generate DLT for enrolled patient in this cohort -----------------------
         if (titration & n[d[1], d[2]] < cohortsize & ft) {
           ft=FALSE
 
@@ -274,21 +281,29 @@ get.oc.comb <- function (target, p.true, ncohort, cohortsize, n.earlystop = NULL
         }
 
 
-
-        nc = n[d[1], d[2]]
-        if (!is.na(b.elim[nc])) {
-          if (y[d[1], d[2]] >= b.elim[nc]) {
-            for (i in min(d[1], dim(p.true)[1]):dim(p.true)[1]) {
+        
+        nc = n[d[1], d[2]] #the updated number of patients treated for this dose
+        
+        ## examine elimination -------------------------------------------------
+        if (!is.na(b.elim[nc])) { # if eliminated boundary exists
+          
+          if (y[d[1], d[2]] >= b.elim[nc]) { # if number of DLTs in current dose exceeds elimination boundary
+            
+          
+            for (i in min(d[1], dim(p.true)[1]):dim(p.true)[1]) { # set elimination status for current and higher dose to 1
               for (j in min(d[2], dim(p.true)[2]):dim(p.true)[2]) {
                 elimi[i, j] = 1
               }
             }
-            if (d[1] == 1 && d[2] == 1) {
+            
+            if (d[1] == 1 && d[2] == 1) { # if current dose is lowest dose, early stop
               d = c(99, 99)
               earlystop = 1
               break
             }
           }
+          
+          
           if (extrasafe) {
             if (d[1] == 1 && d[2] == 1 && n[1, 1] >=
                 3) {
@@ -302,44 +317,48 @@ get.oc.comb <- function (target, p.true, ncohort, cohortsize, n.earlystop = NULL
           }
         }
 
-        if (n[d[1],d[2]] >= n.earlystop  && (y[d[1],d[2]]>b.e[n[d[1],d[2]]] ||
-                                             (d[1]==dim(p.true)[1] && d[2]==dim(p.true)[2]) ||
-                                             ( d[1]==dim(p.true)[1] && d[2]<dim(p.true)[2] && elimi[d[1],d[2]+1]==1 ) ||
-                                             ( d[1]<dim(p.true)[1] && d[2]==dim(p.true)[2] && elimi[d[1]+1,d[2]]==1 ) ||
-                                             ( d[1]<dim(p.true)[1] && d[2]<dim(p.true)[2] && elimi[d[1]+1,d[2]]==1 && elimi[d[1],d[2]+1]==1 ) )  &&
-            (y[d[1],d[2]]<b.d[n[d[1],d[2]]] || (d[1]==1 && d[2]==1) ) ) break;
+        ## check if need to stop the trial ----------------------------------------
+        if (n[d[1],d[2]] >= n.earlystop  &&  # MUST: current dose reach early stop cohort size and satisfy one of the following:
+                                             (y[d[1],d[2]]>b.e[n[d[1],d[2]]] || #  current dose reach elimination boundary
+                                             (d[1]==dim(p.true)[1] && d[2]==dim(p.true)[2]) || #  current dose is highest dose
+                                             ( d[1]==dim(p.true)[1] && d[2]<dim(p.true)[2] && elimi[d[1],d[2]+1]==1 ) || # higher dose eliminated in one direction, current dose reach highest dose in one drug
+                                             ( d[1]<dim(p.true)[1] && d[2]==dim(p.true)[2] && elimi[d[1]+1,d[2]]==1 ) || 
+                                             ( d[1]<dim(p.true)[1] && d[2]<dim(p.true)[2] && elimi[d[1]+1,d[2]]==1 && elimi[d[1],d[2]+1]==1 ) )  && # higher dose eliminated in both directions 
+            (y[d[1],d[2]]<b.d[n[d[1],d[2]]] || (d[1]==1 && d[2]==1) ) ) break; # MUST: DLTs below de-escalation boundary or current dose is the lowest dose
 
-
-        if (y[d[1], d[2]] <= b.e[nc]) {
-          elevel = matrix(c(1, 0, 0, 1), 2)
-          pr_H0 = rep(0, length(elevel)/2)
-          nn = pr_H0
-          for (i in seq(1, length(elevel)/2, by = 1)) {
-            if (d[1] + elevel[1, i] <= dim(p.true)[1] &&
+        
+        ## escalate ---------------------------------
+        if (y[d[1], d[2]] <= b.e[nc]) {  
+          elevel = matrix(c(1, 0, 0, 1), 2) # Two potential escalation directions
+          pr_H0 = rep(0, length(elevel)/2) # to store probabilities for two potential dose
+          nn = pr_H0 # store number of patients treated at each candidate dose
+          
+          for (i in seq(1, length(elevel)/2, by = 1)) { # check for two candidates
+            if (d[1] + elevel[1, i] <= dim(p.true)[1] && # check if candidate dose is within the dose matrix
                 d[2] + elevel[2, i] <= dim(p.true)[2]) {
               if (elimi[d[1] + elevel[1, i], d[2] + elevel[2,
-                                                           i]] == 0) {
+                                                           i]] == 0) { # if candidate has not been eliminated
                 yn = y[d[1] + elevel[1, i], d[2] + elevel[2,
-                                                          i]]
+                                                          i]] # observed DLTs at candidate dose
                 nn[i] = n[d[1] + elevel[1, i], d[2] +
-                            elevel[2, i]]
-                pr_H0[i] <- pbeta(lambda2, yn + 0.5,
-                                  nn[i] - yn + 0.5) - pbeta(lambda1,
-                                                            yn + 0.5, nn[i] - yn + 0.5)
+                            elevel[2, i]] # observed number of patients at candidate dose
+                pr_H0[i] <- pbeta(lambda2, yn + 0.5, nn[i] - yn + 0.5) -
+                            pbeta(lambda1, yn + 0.5, nn[i] - yn + 0.5) # prob of within target DLT boundary
               }
             }
           }
-          pr_H0 = pr_H0 + nn * 5e-04
-          if (max(pr_H0) == 0) {
+          pr_H0 = pr_H0 + nn * 5e-04 # avoid zero prob
+          if (max(pr_H0) == 0) { ##!!! no valid escalation, but not gonna happen due to previous command?---------------------------
             d = d
           }
-          else {
+          else { ## select candidate dose with higher prob; if equal, then randomly pick one
             k = which(pr_H0 == max(pr_H0))[as.integer(runif(1) *
                                                         length(which(pr_H0 == max(pr_H0))) + 1)]
             d = d + c(elevel[1, k], elevel[2, k])
           }
         }
-        else if (y[d[1], d[2]] >= b.d[nc]) {
+        ## de-escalate ----------------------------
+        else if (y[d[1], d[2]] >= b.d[nc]) { 
           delevel = matrix(c(-1, 0, 0, -1), 2)
           pr_H0 = rep(0, length(delevel)/2)
           nn = pr_H0
@@ -350,9 +369,8 @@ get.oc.comb <- function (target, p.true, ncohort, cohortsize, n.earlystop = NULL
                                                           i]]
               nn[i] = n[d[1] + delevel[1, i], d[2] +
                           delevel[2, i]]
-              pr_H0[i] = pbeta(lambda2, yn + 0.5, nn[i] -
-                                 yn + 0.5) - pbeta(lambda1, yn + 0.5,
-                                                   nn[i] - yn + 0.5)
+              pr_H0[i] = pbeta(lambda2, yn + 0.5, nn[i] - yn + 0.5) - 
+                         pbeta(lambda1, yn + 0.5, nn[i] - yn + 0.5)
             }
           }
           pr_H0 = pr_H0 + nn * 5e-04
@@ -365,7 +383,7 @@ get.oc.comb <- function (target, p.true, ncohort, cohortsize, n.earlystop = NULL
             d = d + c(delevel[1, k], delevel[2, k])
           }
         }
-        else {
+        else { ## stay ----------------------------------------------------------
           d = d
         }
 
