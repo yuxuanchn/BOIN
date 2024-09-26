@@ -4,7 +4,7 @@
 #' Obtain the operating characteristics of the BOIN design for drug combination
 #'  trials. The BOIN design is to find a MTD.
 #'
-#' @usage get.oc.comb(target, p.true, ncohort, cohortsize, n.earlystop=NULL, startdose=c(1, 1),
+#' @usage get.oc.comb.mod(target, p.true, ncohort, cohortsize, n.earlystop=NULL, startdose=c(1, 1),
 #'                    titration=FALSE,p.saf=0.6*target, p.tox=1.4*target, cutoff.eli=0.95,
 #'                    extrasafe=FALSE,offset=0.05, ntrial=1000, mtd.contour=FALSE,
 #'                    boundMTD=FALSE, seed=6)
@@ -311,10 +311,11 @@ get.oc.comb.mod <- function (target, p.true, ncohort, cohortsize, preferred.dose
           elevel = matrix(c(1, 0, 0, 1), 2) # Two potential escalation directions
           pr_H0 = rep(0, length(elevel)/2) # to store probabilities for two potential dose
           nn = pr_H0 # store number of patients treated at each candidate dose
-          
+          prefer = rep(0, length(elevel)/2) # to store preference for two candidate dose
           for (i in seq(1, length(elevel)/2, by = 1)) { # check for two candidates
             if (d[1] + elevel[1, i] <= dim(p.true)[1] && # check if candidate dose is within the dose matrix
                 d[2] + elevel[2, i] <= dim(p.true)[2]) {
+              prefer[i] = preferred.doses[d[1] + elevel[1, i], d[2] + elevel[2, i]]
               if (elimi[d[1] + elevel[1, i], d[2] + elevel[2,
                                                            i]] == 0) { # if candidate has not been eliminated
                 yn = y[d[1] + elevel[1, i], d[2] + elevel[2,
@@ -323,17 +324,26 @@ get.oc.comb.mod <- function (target, p.true, ncohort, cohortsize, preferred.dose
                             elevel[2, i]] # observed number of patients at candidate dose
                 pr_H0[i] <- pbeta(lambda2, yn + 0.5, nn[i] - yn + 0.5) -
                   pbeta(lambda1, yn + 0.5, nn[i] - yn + 0.5) # prob of within target DLT boundary
+                
+                
               }
             }
           }
-          pr_H0 = pr_H0 + nn * 5e-04 # avoid zero prob
+          
+          pr_H0 = pr_H0 + nn * 5e-04 + ifelse(prefer==-1, -99,0) # negative prob for not considered dose # avoid zero prob if candidate dose have patients
           if (max(pr_H0) == 0) { ##!!! no valid escalation, but not gonna happen due to previous command?---------------------------
             d = d
           }
-          else { ## select candidate dose with higher prob; if equal, then randomly pick one
-            k = which(pr_H0 == max(pr_H0))[as.integer(runif(1) *
-                                                        length(which(pr_H0 == max(pr_H0))) + 1)]
-            d = d + c(elevel[1, k], elevel[2, k])
+          else { ## select candidate dose with higher prob; if equal, then pick the preferred dose; if equally preferred, choose randomly
+            if(pr_H0[1]!=pr_H0[2]){
+              k = which(pr_H0 == max(pr_H0))
+              d = d + c(elevel[1, k], elevel[2, k])
+            }else{
+              k = which(prefer == max(prefer))[as.integer(runif(1) *
+                                                            length(which(pr_H0 == max(pr_H0))) + 1)]
+              if(prefer[k]==-1) {d = d} # if not considered, stay
+              else{d = d + c(elevel[1, k], elevel[2, k])}
+            }
           }
         }
         ## de-escalate ----------------------------
@@ -341,6 +351,7 @@ get.oc.comb.mod <- function (target, p.true, ncohort, cohortsize, preferred.dose
           delevel = matrix(c(-1, 0, 0, -1), 2)
           pr_H0 = rep(0, length(delevel)/2)
           nn = pr_H0
+          prefer = rep(0, length(elevel)/2) # to store preference for two candidate dose
           for (i in seq(1, length(delevel)/2, by = 1)) {
             if (d[1] + delevel[1, i] > 0 && d[2] + delevel[2,
                                                            i] > 0) {
@@ -350,16 +361,25 @@ get.oc.comb.mod <- function (target, p.true, ncohort, cohortsize, preferred.dose
                           delevel[2, i]]
               pr_H0[i] = pbeta(lambda2, yn + 0.5, nn[i] - yn + 0.5) - 
                 pbeta(lambda1, yn + 0.5, nn[i] - yn + 0.5)
+              
+              prefer[i] = preferred.doses[d[1] + delevel[1, i], d[2] + delevel[2, i]]
             }
           }
-          pr_H0 = pr_H0 + nn * 5e-04
+          pr_H0 = (pr_H0 + nn * 5e-04) + ifelse(prefer==-1, -99,0) # negative prob for not considered dose
+          
           if (max(pr_H0) == 0) {
             d = d
           }
           else {
-            k = which(pr_H0 == max(pr_H0))[as.integer(runif(1) *
-                                                        length(which(pr_H0 == max(pr_H0))) + 1)]
-            d = d + c(delevel[1, k], delevel[2, k])
+            if(pr_H0[1]!=pr_H0[2]){
+              k = which(pr_H0 == max(pr_H0))
+              d = d + c(delevel[1, k], delevel[2, k])
+            }else{
+              k = which(prefer == max(prefer))[as.integer(runif(1) *
+                                                            length(which(pr_H0 == max(pr_H0))) + 1)]
+              if(prefer[k]==-1) {d = d} # if not considered, stay
+              else{d = d + c(delevel[1, k], delevel[2, k])}
+            }
           }
         }
         else { ## stay ----------------------------------------------------------
@@ -613,6 +633,7 @@ get.oc.comb.mod <- function (target, p.true, ncohort, cohortsize, preferred.dose
     }
     out=get.oc.comb.boin(target = target, p.true = p.true,
                          ncohort = sum(ncohort), cohortsize = cohortsize,
+                         preferred.doses = preferred.doses,
                          n.earlystop = n.earlystop, startdose = startdose,
                          titration = titration,
                          p.saf = p.saf, p.tox = p.tox,
